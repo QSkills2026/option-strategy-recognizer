@@ -202,4 +202,4 @@ MIT
 
 ## Related
 
-- [option-risk-engine](https://github.com/quant-tools/option-risk-engine) — risk analysis on top of these strategy groups (assignment risk, margin alerts, stress test)
+- [option-risk-engine](https://github.com/QSkills2026/option-risk-engine) — risk analysis on top of these strategy groups (assignment risk, margin alerts, stress test)
