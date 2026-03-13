@@ -384,7 +384,15 @@ class OptionStrategyRecognizer:
             long_qty  = abs(long_leg.position)
             sg.max_profit = sg.net_credit if sg.net_credit > 0 else None
             uncovered = short_qty - long_qty
-            sg.max_loss = None if uncovered > 0 else abs(sg.net_credit)
+            if uncovered > 0 and stype == "Ratio Call Spread":
+                sg.max_loss = None  # Truly unlimited: stock can rise without bound
+            elif uncovered > 0 and stype == "Ratio Put Spread":
+                # Stock floors at $0: bounded max loss at stock = 0
+                sg.max_loss = max(0.0,
+                                  (short_qty * short_leg.strike - long_qty * long_leg.strike)
+                                  * mult - sg.net_credit)
+            else:
+                sg.max_loss = abs(sg.net_credit)
             if stype == "Ratio Put Spread":
                 sg.breakevens = [short_leg.strike - sg.net_credit / short_qty / mult]
             else:
@@ -417,20 +425,44 @@ class OptionStrategyRecognizer:
         elif stype == "Naked Put":
             sp = opt_legs[0]
             sg.max_profit = sg.net_credit
-            sg.max_loss = None
+            # Stock floors at $0 — max loss is bounded, not unlimited
+            sg.max_loss = (sp.strike - credit_per_contract) * mult * contracts
             sg.breakevens = [sp.strike - credit_per_contract]
 
         elif stype == "Naked Call":
             sc = opt_legs[0]
             sg.max_profit = sg.net_credit
-            sg.max_loss = None
+            sg.max_loss = None  # Truly unlimited: stock can rise without bound
             sg.breakevens = [sc.strike + credit_per_contract]
 
         elif stype == "Covered Call":
             sc = next((p for p in opt_legs if p.put_call == "C"), None)
             stk = sg.stock_leg
             if sc and stk:
-                sg.max_profit = ((sc.strike - stk.cost_basis_price) * stk.position
-                                 + sg.net_credit)
-                sg.max_loss = None
-                sg.breakevens = [stk.cost_basis_price - credit_per_contract]
+                # Fallback to mark_price if cost_basis is missing (e.g. transferred positions)
+                basis = stk.cost_basis_price if stk.cost_basis_price > 0 else stk.mark_price
+                sg.max_profit = ((sc.strike - basis) * stk.position + sg.net_credit)
+                # Stock goes to $0 — bounded by cost basis minus premium received
+                sg.max_loss = basis * abs(stk.position) - sg.net_credit
+                sg.breakevens = [basis - credit_per_contract]
+
+        elif stype in ("Diagonal Spread", "Calendar Spread", "PMCC"):
+            short_legs = [p for p in opt_legs if p.position < 0]
+            long_legs  = [p for p in opt_legs if p.position > 0]
+            if short_legs and long_legs:
+                short_leg = short_legs[0]
+                long_leg  = long_legs[0]
+                diag_contracts = abs(short_leg.position)
+                if sg.net_credit <= 0:
+                    sg.max_loss = abs(sg.net_credit)
+                else:
+                    strike_diff = abs(short_leg.strike - long_leg.strike)
+                    sg.max_loss = max(0.0,
+                                     (strike_diff - sg.net_credit / diag_contracts / mult)
+                                     * mult * diag_contracts)
+
+        elif stype in ("Long Call", "Long Put", "LEAPS Call", "LEAPS Put",
+                       "Straddle", "Strangle"):
+            # Max loss = premium paid (net debit). net_credit is negative for long positions.
+            sg.max_loss = max(0.0, abs(sg.net_credit))
+            sg.max_profit = None  # Unlimited for calls/straddles; leave None for simplicity
