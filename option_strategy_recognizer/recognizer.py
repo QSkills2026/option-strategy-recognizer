@@ -484,6 +484,12 @@ class OptionStrategyRecognizer:
                 # Short: received premium → max profit = credit received; max loss = unlimited
                 sg.max_profit = sg.net_credit
                 sg.max_loss = None
+                # Downside floor: stock → $0, only short puts are exercised
+                put_notional = sum(
+                    abs(p.position) * p.strike * p.multiplier
+                    for p in sg.legs if p.put_call == "P" and p.position < 0
+                )
+                sg.max_loss_downside = max(0.0, put_notional - sg.net_credit)
             else:
                 # Long: paid premium → max loss = debit paid; max profit = unlimited
                 sg.max_loss = abs(sg.net_credit)
